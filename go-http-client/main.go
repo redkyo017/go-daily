@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"log"
+	"net/url"
+	"strconv"
 	"sync"
 
 	"github.com/0x9ef/clientx"
@@ -71,6 +73,29 @@ func (r *GenerateRequest) Validate() error {
 	}
 	if r.ColorMode != ColorModeBrightness && r.ColorMode != ColorModeAround {
 		return errors.New("invalid ColorMode, supported: brightness, around")
+	}
+	return nil
+}
+
+func (r GenerateRequest) Encode(v url.Values) error {
+	v.Set("r", strconv.Itoa(r.R))
+	v.Set("g", strconv.Itoa(r.G))
+	v.Set("b", strconv.Itoa(r.B))
+	v.Set("borderWidth", strconv.Itoa(r.BorderWidth))
+	if r.Titles != 0 {
+		v.Set("titles", strconv.Itoa(r.Titles))
+	}
+	if r.TitleSize != 0 {
+		v.Set("titleSize", strconv.Itoa(r.TitleSize))
+	}
+	if r.ColorMode != "" {
+		v.Set("mode", r.ColorMode.String())
+	}
+	if r.JSON != 0 {
+		v.Set("json", "1")
+	}
+	if r.Base64 != 0 {
+		v.Set("base64", "1")
 	}
 	return nil
 }

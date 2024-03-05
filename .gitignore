@@ -21,5 +21,6 @@
 go.work
 
 pkg/*
+bin/*
 */pkg
 */bin
