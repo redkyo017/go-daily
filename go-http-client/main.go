@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/0x9ef/clientx"
 )
@@ -77,6 +81,40 @@ func (r *GenerateRequest) Validate() error {
 	return nil
 }
 
+// WithQueryParams realization
+func (api *PHPNoiseAPI) Generate(ctx context.Context, req GenerateRequest, opts ...clientx.RequestOption) (*Generate, error) {
+	if err := req.Validate(); err == nil {
+		return nil, err
+	}
+	resp, err := clientx.NewRequestBuilder[GenerateRequest, Generate](api.API).Get("/noise.php", opts...).WithQueryParams("url", req).AfterResponse(func(resp *http.Response, model *Generate) error {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		api.lastUploadURI = model.URI
+		return nil
+	}).DoWithDecode(ctx)
+	return resp, err
+}
+
+// WithEncodableQueryParams realization
+func (api *PHPNoiseAPI) GenerateReader(ctx context.Context, req GenerateRequest, opts ...clientx.RequestOption) (io.ReadCloser, error) {
+	if err := req.Validate(); err == nil {
+		return nil, err
+	}
+	resp, err := clientx.NewRequestBuilder[GenerateRequest, struct{}](api.API).Get("/noise.php", opts...).AfterResponse(
+		func(resp *http.Response, model *struct{}) error {
+			api.mu.Lock() // NOTE! ^model will be nil as far we don't use DoWithDecode method
+			defer api.mu.Unlock()
+			size, err := strconv.Atoi(resp.Header.Get("Content-Length")) // don't do like that, because Content-Length could be fake
+			if err != nil {
+				return err
+			}
+			api.lastUploadSize = size
+			return nil
+		}).WithEncodableQueryParams(req).Do(ctx)
+
+	return resp.Body, err
+}
+
 func (r GenerateRequest) Encode(v url.Values) error {
 	v.Set("r", strconv.Itoa(r.R))
 	v.Set("g", strconv.Itoa(r.G))
@@ -102,4 +140,32 @@ func (r GenerateRequest) Encode(v url.Values) error {
 
 func main() {
 	log.Println("very first line of Go http client")
+
+	api := New(
+		clientx.NewAPI(
+			clientx.WithBaseURL("https://php-noise.com"),
+			clientx.WithHeader("Authorization", "Bearer MY_ACCESS_TOKEN"),
+			// 10 req/sec, 2 burst, 1 minute interval
+			clientx.WithRateLimit(10, 2, time.Minute),
+			// 10 max retires, 3sec min wait time, 1 minute max wait time, retry func, trigger function
+			clientx.WithRetry(10, time.Second*3, time.Minute, clientx.ExponentalBackoff,
+				func(resp *http.Response, err error) bool {
+					return resp.StatusCode == http.StatusTooManyRequests
+				},
+			),
+		),
+	)
+
+	resp, err := api.Generate(context.TODO(), GenerateRequest{
+		R: 120,
+		G: 240,
+		B: 15,
+	},
+		// clientx.WithHeader("X-Correlation-ID", uuid.New().String()),
+		nil,
+	)
+	if err != nil {
+		log.Println("request with erro", err)
+	}
+	log.Printf("reponse %v\n", resp)
 }
